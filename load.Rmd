@@ -1,0 +1,91 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+```{r}
+suppressPackageStartupMessages({
+    library(readr)
+    library(here)
+    library(stringr)
+    library(dplyr)
+    library(magrittr)
+    library(SingleCellExperiment)
+    library(scater)
+    library(flexmix)
+    library(splines)
+    library(BiocParallel)
+    library(biomaRt)
+    library(miQC)
+    library(Seurat)
+    library(SeuratDisk)
+})
+set_here()
+mtx <- Read10X(data.dir = here("GSM3897320/"))
+prj <- "P60_ME_Rax"
+
+```
+
+```{r}
+srt <- CreateSeuratObject(
+        counts = mtx,
+        project = prj,
+        min.cells = 0,
+        min.features = 200
+    )
+srt$age <- "P60"
+srt$study_id <- "mu_2021"
+srt$tech <- "10xv2"
+
+
+```
+
+```{r}
+sce <- as.SingleCellExperiment(srt)
+
+mt_genes <- grepl("^mt-",  rownames(sce))
+feature_ctrls <- list(mito = rownames(sce)[mt_genes])
+
+feature_ctrls
+```
+
+```{r}
+sce <- addPerCellQC(sce, subsets = feature_ctrls,
+                    BPPARAM = BiocParallel::MulticoreParam())
+
+plotMetrics(sce)
+```
+
+```{r}
+model <- mixtureModel(sce)
+plotModel(sce, model)
+plotFiltering(sce, model)
+```
+
+```{r}
+model2 <- mixtureModel(sce, model_type = "spline")
+plotModel(sce, model2)
+plotFiltering(sce, model2)
+```
+
+```{r}
+plotFiltering(sce, model2, posterior_cutoff = 0.9)
+```
+```{r}
+sce <- filterCells(sce, model2, posterior_cutoff = 0.9)
+srt <- as.Seurat(sce)
+```
+```{r}
+srt <- RenameCells(srt, new.names = str_c(prj,  colnames(srt),
+                                          sep = "_"))
+
+glimpse(srt@meta.data)
+table(srt$orig.ident)
+SaveH5Seurat(srt, filename = "mu2021_me.h5Seurat")
+Convert("mu2021_me.h5Seurat", dest = "h5ad")
+```
+
